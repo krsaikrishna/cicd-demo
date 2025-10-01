@@ -3,7 +3,7 @@ pipeline {
 
   environment {
     // change to your docker hub image name (without tag)
-    DOCKER_IMAGE = "YOUR_DOCKERHUB_USERNAME/cicd-demo"
+    DOCKER_IMAGE = "krsaikrishna/cicd-demo"
   }
 
   stages {
