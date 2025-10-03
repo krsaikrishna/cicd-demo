@@ -47,7 +47,13 @@ pipeline {
         }
       }
     }
-
+    
+    stage('Deploy to Kubernetes') {
+      steps {
+        sh 'kubectl apply -f k8s/k8s-deployment.yaml'
+        sh 'kubectl apply -f k8s/k8s-service.yaml'
+       }
+    }
     stage('Cleanup') {
       steps {
         sh 'docker image prune -f || true'
