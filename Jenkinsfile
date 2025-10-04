@@ -42,11 +42,10 @@ pipeline {
             steps {
                 withCredentials([file(credentialsId: "${KUBECONFIG_CRED}", variable: 'KUBECONFIG_FILE')]) {
                     sh '''
-                    mkdir -p $HOME/.kube
-                    cp $KUBECONFIG_FILE $HOME/.kube/config
-                    chmod 600 $HOME/.kube/config
-                    kubectl config use-context minikube
-                    kubectl get nodes
+                    sudo mkdir -p /var/lib/jenkins/.kube
+                    sudo cp $KUBECONFIG_FILE /var/lib/jenkins/.kube/config
+                    sudo chown -R jenkins:jenkins /var/lib/jenkins/.kube
+                    sudo chmod 600 /var/lib/jenkins/.kube/config
                     '''
                 }
             }
@@ -55,9 +54,8 @@ pipeline {
         stage('Deploy to Kubernetes') {
             steps {
                 sh '''
-                kubectl apply -f k8s/k8s-deployment.yaml --validate=false
-                kubectl apply -f k8s/k8s-service.yaml --validate=false
-                kubectl rollout status deployment/cicd-demo
+                sudo -u jenkins kubectl apply -f k8s/k8s-deployment.yaml
+                sudo -u jenkins kubectl apply -f k8s/k8s-service.yaml
                 '''
             }
         }
