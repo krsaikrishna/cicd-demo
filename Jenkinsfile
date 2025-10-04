@@ -1,73 +1,91 @@
 pipeline {
-    agent any
+  agent any
 
-    environment {
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials')   // Your DockerHub credentials ID
-        IMAGE_NAME = "krsaikrishna/cicd-demo"              // Replace with your repo name
-        KUBECONFIG_CRED = 'kubeconfig-minikube'                       // The Jenkins secret file ID
+  environment {
+    DOCKER_IMAGE = "krsaikrishna/cicd-demo"
+    KUBE_DEPLOYMENT = "k8s/k8s-deployment.yaml"
+    KUBE_SERVICE = "k8s/k8s-service.yaml"
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
     }
 
-    stages {
-        stage('Checkout') {
-            steps {
-                git branch: 'main', url: 'https://github.com/krsaikrishna/cicd-demo.git'
-            }
-        }
-
-        stage('Build App') {
-            steps {
-                sh 'npm install'
-            }
-        }
-
-        stage('Build Docker Image') {
-            steps {
-                sh '''
-                docker build -t $IMAGE_NAME:latest .
-                docker images | grep cicd-demo
-                '''
-            }
-        }
-
-        stage('Push Docker Image') {
-            steps {
-                sh '''
-                echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin
-                docker push $IMAGE_NAME:latest
-                '''
-            }
-        }
-
-        stage('Setup Kubeconfig') {
-            steps {
-                withCredentials([file(credentialsId: "${KUBECONFIG_CRED}", variable: 'KUBECONFIG_FILE')]) {
-                    sh '''
-                    sudo mkdir -p /var/lib/jenkins/.kube
-                    sudo rm -f /var/lib/jenkins/.kube/config
-                    sudo cp $KUBECONFIG_FILE /var/lib/jenkins/.kube/config
-                    sudo chown -R jenkins:jenkins /var/lib/jenkins/.kube
-                    sudo chmod 600 /var/lib/jenkins/.kube/config
-                    '''
-                }
-            }
-        }
-
-        stage('Deploy to Kubernetes') {
-            steps {
-                sh '''
-                sudo -u jenkins kubectl apply -f k8s/k8s-deployment.yaml
-                sudo -u jenkins kubectl apply -f k8s/k8s-service.yaml
-                '''
-            }
-        }
+    stage('Install Dependencies') {
+      steps {
+        sh 'npm install'
+      }
     }
 
-    post {
-        success {
-            echo "✅ Deployment successful!"
-        }
-        failure {
-            echo "❌ Deployment failed!"
-        }
+    stage('Run Tests') {
+      steps {
+        sh 'npm test'
+      }
     }
+
+    stage('Build Docker Image') {
+      steps {
+        script {
+          IMAGE_TAG = "${env.BUILD_NUMBER}"
+          sh "docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} ."
+        }
+      }
+    }
+
+    stage('Push to Docker Hub') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+          sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+          sh "docker push ${DOCKER_IMAGE}:${IMAGE_TAG}"
+          sh "docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} ${DOCKER_IMAGE}:latest"
+          sh "docker push ${DOCKER_IMAGE}:latest"
+        }
+      }
+    }
+
+    stage('Setup Kubeconfig') {
+      steps {
+        withCredentials([file(credentialsId: 'kubeconfig-minikube', variable: 'KUBECONFIG_FILE')]) {
+          sh '''
+            echo "Setting up kubeconfig for Jenkins user..."
+            mkdir -p $HOME/.kube
+            cp $KUBECONFIG_FILE $HOME/.kube/config
+            chmod 600 $HOME/.kube/config
+            echo "✅ Kubeconfig setup complete."
+          '''
+        }
+      }
+    }
+
+    stage('Deploy to Kubernetes') {
+      steps {
+        script {
+          sh '''
+            echo "Deploying to Kubernetes..."
+            kubectl apply -f ${KUBE_DEPLOYMENT}
+            kubectl apply -f ${KUBE_SERVICE}
+            kubectl get pods
+          '''
+        }
+      }
+    }
+
+    stage('Cleanup Docker') {
+      steps {
+        sh 'docker image prune -f || true'
+      }
+    }
+  }
+
+  post {
+    success {
+      echo "✅ CI/CD pipeline completed successfully!"
+    }
+    failure {
+      echo "❌ Deployment failed!"
+    }
+  }
 }
