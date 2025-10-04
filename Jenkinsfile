@@ -43,6 +43,7 @@ pipeline {
                 withCredentials([file(credentialsId: "${KUBECONFIG_CRED}", variable: 'KUBECONFIG_FILE')]) {
                     sh '''
                     sudo mkdir -p /var/lib/jenkins/.kube
+                    sudo rm -f /var/lib/jenkins/.kube/config
                     sudo cp $KUBECONFIG_FILE /var/lib/jenkins/.kube/config
                     sudo chown -R jenkins:jenkins /var/lib/jenkins/.kube
                     sudo chmod 600 /var/lib/jenkins/.kube/config
