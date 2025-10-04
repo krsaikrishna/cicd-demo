@@ -1,73 +1,74 @@
 pipeline {
-  agent any
+    agent any
 
-  environment {
-    // change to your docker hub image name (without tag)
-    DOCKER_IMAGE = "krsaikrishna/cicd-demo"
-  }
-
-  stages {
-    stage('Checkout') {
-      steps {
-        checkout scm
-      }
+    environment {
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials')   // Your DockerHub credentials ID
+        IMAGE_NAME = "krsaikrishna/cicd-demo"              // Replace with your repo name
+        KUBECONFIG_CRED = 'kubeconfig-minikube'                       // The Jenkins secret file ID
     }
 
-    stage('Install') {
-      steps {
-        sh 'npm install'
-      }
-    }
-
-    stage('Test') {
-      steps {
-        sh 'npm test'
-      }
-    }
-
-    stage('Build Docker Image') {
-      steps {
-        script {
-          // tag with build number for traceability
-          IMAGE_TAG = "${env.BUILD_NUMBER}"
-          sh "docker build -t ${DOCKER_IMAGE}:${IMAGE_TAG} ."
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/krsaikrishna/cicd-demo.git'
+            }
         }
-      }
-    }
 
-    stage('Push to Docker Hub') {
-      steps {
-        // Replace 'dockerhub-credentials' with the id you create in Jenkins (username/password)
-        withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-          sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
-          sh "docker push ${DOCKER_IMAGE}:${IMAGE_TAG}"
-          // also push latest
-          sh "docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} ${DOCKER_IMAGE}:latest || true"
-          sh "docker push ${DOCKER_IMAGE}:latest || true"
+        stage('Build App') {
+            steps {
+                sh 'npm install'
+            }
         }
-      }
-    }
-    
-    stage('Deploy to Kubernetes') {
-      steps {
-        sh 'kubectl apply -f k8s/k8s-deployment.yaml'
-        sh 'kubectl apply -f k8s/k8s-service.yaml'
-       }
-    }
-    stage('Cleanup') {
-      steps {
-        sh 'docker image prune -f || true'
-      }
-    }
-  }
 
-  post {
-    success {
-      echo "Build and push succeeded: ${DOCKER_IMAGE}:${IMAGE_TAG}"
+        stage('Build Docker Image') {
+            steps {
+                sh '''
+                docker build -t $IMAGE_NAME:latest .
+                docker images | grep cicd-demo
+                '''
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                sh '''
+                echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin
+                docker push $IMAGE_NAME:latest
+                '''
+            }
+        }
+
+        stage('Setup Kubeconfig') {
+            steps {
+                withCredentials([file(credentialsId: "${KUBECONFIG_CRED}", variable: 'KUBECONFIG_FILE')]) {
+                    sh '''
+                    mkdir -p $HOME/.kube
+                    cp $KUBECONFIG_FILE $HOME/.kube/config
+                    chmod 600 $HOME/.kube/config
+                    kubectl config use-context minikube
+                    kubectl get nodes
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh '''
+                kubectl apply -f k8s/k8s-deployment.yaml --validate=false
+                kubectl apply -f k8s/k8s-service.yaml --validate=false
+                kubectl rollout status deployment/cicd-demo
+                '''
+            }
+        }
     }
-    failure {
-      echo "Build failed"
+
+    post {
+        success {
+            echo "✅ Deployment successful!"
+        }
+        failure {
+            echo "❌ Deployment failed!"
+        }
     }
-  }
 }
-
